@@ -24,18 +24,18 @@ class ClipboardAgent: NSObject {
     }
     
     @objc func activeAppChanged(_ notification: Notification) {
-        processClipboard()
+        processClipboard(isChangeTrigger: false)
     }
     
     func checkClipboard() {
         let currentChangeCount = NSPasteboard.general.changeCount
         if currentChangeCount != lastChangeCount {
             lastChangeCount = currentChangeCount
-            processClipboard()
+            processClipboard(isChangeTrigger: true)
         }
     }
     
-    func processClipboard() {
+    func processClipboard(isChangeTrigger: Bool) {
         let pasteboard = NSPasteboard.general
         guard let types = pasteboard.types else { return }
         
@@ -51,30 +51,33 @@ class ClipboardAgent: NSObject {
         }
         
         if hasImage {
-            if isJumpActive && !hasBase64Payload {
-                guard let tiffData = pasteboard.data(forType: .tiff) else { return }
-                
-                var base64String = ""
-                if let image = NSImage(data: tiffData),
-                   let tiffRepresentation = image.tiffRepresentation,
-                   let bitmapImage = NSBitmapImageRep(data: tiffRepresentation),
-                   let pngData = bitmapImage.representation(using: .png, properties: [:]) {
-                    base64String = pngData.base64EncodedString()
-                } else {
-                    base64String = tiffData.base64EncodedString()
+            // Write payload immediately on new copy or if Jump is active
+            if (isChangeTrigger && !hasBase64Payload) || isJumpActive {
+                if !hasBase64Payload {
+                    guard let tiffData = pasteboard.data(forType: .tiff) else { return }
+                    
+                    var base64String = ""
+                    if let image = NSImage(data: tiffData),
+                       let tiffRepresentation = image.tiffRepresentation,
+                       let bitmapImage = NSBitmapImageRep(data: tiffRepresentation),
+                       let pngData = bitmapImage.representation(using: .png, properties: [:]) {
+                        base64String = pngData.base64EncodedString()
+                    } else {
+                        base64String = tiffData.base64EncodedString()
+                    }
+                    
+                    let textPayload = "CLIPBOARD_IMAGE_BASE64:" + base64String
+                    
+                    let item = NSPasteboardItem()
+                    item.setData(tiffData, forType: .tiff)
+                    item.setString(textPayload, forType: .string)
+                    
+                    self.lastChangeCount = currentChangeCount() + 1
+                    pasteboard.clearContents()
+                    pasteboard.writeObjects([item])
                 }
-                
-                let textPayload = "CLIPBOARD_IMAGE_BASE64:" + base64String
-                
-                let item = NSPasteboardItem()
-                item.setData(tiffData, forType: .tiff)
-                item.setString(textPayload, forType: .string)
-                
-                self.lastChangeCount = currentChangeCount() + 1
-                pasteboard.clearContents()
-                pasteboard.writeObjects([item])
-                
             } else if !isJumpActive && hasBase64Payload {
+                // Remove payload when any Mac app (other than Jump) becomes active
                 guard let tiffData = pasteboard.data(forType: .tiff) else { return }
                 
                 let item = NSPasteboardItem()
@@ -94,8 +97,6 @@ class ClipboardAgent: NSObject {
 
 func main() {
     let _ = ClipboardAgent()
-    
-    // Start CFRunLoop to listen for notifications and timers
     CFRunLoopRun()
 }
 
