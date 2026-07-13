@@ -95,8 +95,10 @@ class ClipboardAgent: NSObject {
     }
 }
 
+var globalAgent: ClipboardAgent?
+
 func main() {
-    let _ = ClipboardAgent()
+    globalAgent = ClipboardAgent()
     CFRunLoopRun()
 }
 
