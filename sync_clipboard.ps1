@@ -1,7 +1,7 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-Write-Host "Clipboard Sync Monitor started (Base64 Stable DIB Mode)..."
+Write-Host "Clipboard Sync Monitor started (Base64 Dual-Format with Native DIB)..."
 $lastText = ""
 
 while ($true) {
@@ -18,28 +18,29 @@ while ($true) {
                 $ms = New-Object System.IO.MemoryStream(,$bytes)
                 $img = [System.Drawing.Image]::FromStream($ms)
                 
-                # Get raw DIB (Device Independent Bitmap) bytes for Outlook compatibility.
-                # DIB is the BMP file bytes minus the 14-byte BMP file header.
+                # Get raw BMP bytes
                 $bmpStream = New-Object System.IO.MemoryStream
                 $img.Save($bmpStream, [System.Drawing.Imaging.ImageFormat]::Bmp)
                 $bmpBytes = $bmpStream.ToArray()
                 $bmpStream.Dispose()
                 
-                $dibBytes = New-Object byte[] ($bmpBytes.Length - 14)
-                [System.Array]::Copy($bmpBytes, 14, $dibBytes, 0, $dibBytes.Length)
+                # CF_DIB format MUST be written as a .NET MemoryStream (not a byte array)
+                # to prevent .NET binary serialization, making it readable by native Windows apps like Outlook.
+                $dibStream = New-Object System.IO.MemoryStream
+                $dibStream.Write($bmpBytes, 14, $bmpBytes.Length - 14)
+                $dibStream.Position = 0
                 
-                # Create a DataObject containing Bitmap, DIB, and a dummy text space " "
-                # 1. The DIB format ensures Outlook/Word can paste the image.
-                # 2. The text space " " prevents Jump Desktop from overwriting our image with the Base64 text.
+                # Create a DataObject containing Bitmap, Native DIB, and the original text
                 $data = New-Object System.Windows.Forms.DataObject
                 $data.SetImage($img)
-                $data.SetData("DeviceIndependentBitmap", $dibBytes)
-                $data.SetText(" ")
+                $data.SetData("DeviceIndependentBitmap", $dibStream)
+                $data.SetText($text)
                 
                 [System.Windows.Forms.Clipboard]::SetDataObject($data, $true)
                 
                 $img.Dispose()
                 $ms.Dispose()
+                $dibStream.Dispose()
                 
                 Write-Host "Converted successfully!"
             }
