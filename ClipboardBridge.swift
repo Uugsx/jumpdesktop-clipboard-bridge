@@ -24,18 +24,18 @@ class ClipboardAgent: NSObject {
     }
     
     @objc func activeAppChanged(_ notification: Notification) {
-        processClipboard(isChangeTrigger: false)
+        processClipboard()
     }
     
     func checkClipboard() {
         let currentChangeCount = NSPasteboard.general.changeCount
         if currentChangeCount != lastChangeCount {
             lastChangeCount = currentChangeCount
-            processClipboard(isChangeTrigger: true)
+            processClipboard()
         }
     }
     
-    func processClipboard(isChangeTrigger: Bool) {
+    func processClipboard() {
         let pasteboard = NSPasteboard.general
         guard let types = pasteboard.types else { return }
         
@@ -51,31 +51,30 @@ class ClipboardAgent: NSObject {
         }
         
         if hasImage {
-            // Write payload immediately on new copy or if Jump is active
-            if (isChangeTrigger && !hasBase64Payload) || isJumpActive {
-                if !hasBase64Payload {
-                    guard let tiffData = pasteboard.data(forType: .tiff) else { return }
-                    
-                    var base64String = ""
-                    if let image = NSImage(data: tiffData),
-                       let tiffRepresentation = image.tiffRepresentation,
-                       let bitmapImage = NSBitmapImageRep(data: tiffRepresentation),
-                       let pngData = bitmapImage.representation(using: .png, properties: [:]) {
-                        base64String = pngData.base64EncodedString()
-                    } else {
-                        base64String = tiffData.base64EncodedString()
-                    }
-                    
-                    let textPayload = "CLIPBOARD_IMAGE_BASE64:" + base64String
-                    
-                    let item = NSPasteboardItem()
-                    item.setData(tiffData, forType: .tiff)
-                    item.setString(textPayload, forType: .string)
-                    
-                    self.lastChangeCount = currentChangeCount() + 1
-                    pasteboard.clearContents()
-                    pasteboard.writeObjects([item])
+            // Expose the Base64 text only while Jump Desktop is frontmost.
+            // A newly copied image must remain image-only in regular Mac apps.
+            if isJumpActive && !hasBase64Payload {
+                guard let tiffData = pasteboard.data(forType: .tiff) else { return }
+                
+                var base64String = ""
+                if let image = NSImage(data: tiffData),
+                   let tiffRepresentation = image.tiffRepresentation,
+                   let bitmapImage = NSBitmapImageRep(data: tiffRepresentation),
+                   let pngData = bitmapImage.representation(using: .png, properties: [:]) {
+                    base64String = pngData.base64EncodedString()
+                } else {
+                    base64String = tiffData.base64EncodedString()
                 }
+                
+                let textPayload = "CLIPBOARD_IMAGE_BASE64:" + base64String
+                
+                let item = NSPasteboardItem()
+                item.setData(tiffData, forType: .tiff)
+                item.setString(textPayload, forType: .string)
+                
+                pasteboard.clearContents()
+                pasteboard.writeObjects([item])
+                self.lastChangeCount = pasteboard.changeCount
             } else if !isJumpActive && hasBase64Payload {
                 // Remove payload when any Mac app (other than Jump) becomes active
                 guard let tiffData = pasteboard.data(forType: .tiff) else { return }
@@ -83,15 +82,11 @@ class ClipboardAgent: NSObject {
                 let item = NSPasteboardItem()
                 item.setData(tiffData, forType: .tiff)
                 
-                self.lastChangeCount = currentChangeCount() + 1
                 pasteboard.clearContents()
                 pasteboard.writeObjects([item])
+                self.lastChangeCount = pasteboard.changeCount
             }
         }
-    }
-    
-    private func currentChangeCount() -> Int {
-        return NSPasteboard.general.changeCount
     }
 }
 
